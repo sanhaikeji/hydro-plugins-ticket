@@ -4,7 +4,9 @@ HydroOJ 题目反馈工单插件。学生在题目页右侧点「题目反馈」
 
 > 纯后端 + 少量前端页面，无独立服务、无第三方依赖，只依赖 `hydrooj` 本体。
 
-在线看 UI：`ui-preview.html`（单文件离线预览，含亮色 / 暗色 / 动效分帧，直接下载用浏览器打开即可）。
+在线看 UI：**https://sanhaikeji.github.io/hydro-plugins-ticket/ui-preview.html**
+
+（同一份文件也在仓库里：`ui-preview.html`，单文件离线预览，含亮色 / 暗色 / 动效分帧，下载后浏览器直接打开即可。）
 
 ## 功能
 
