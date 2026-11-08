@@ -1,0 +1,888 @@
+/*
+ * hydrooj-plugin-ticket · UI 设计语言 v2
+ *
+ * 这一版不是「加点渐变和淡入」，而是把两个参考视频逐帧拆开后复刻动效与版式。
+ * 取帧方式：ffmpeg -vf "fps=15 / fps=10, tile=4x4"，对关键段按 0.067s / 0.1s 间隔逐帧查看。
+ *
+ * BV14Q4y1z7bW《每周UI交互灵感#01》5.0~8.4s（封面「My storehouse」）
+ *   - 版式：粉色侧栏 + 纯白超大圆角卡；左半 fluid squircle 色块 + 白色大标题 + 主体图形；
+ *           右半细分割线行列表、小字 PRODUCT / 名称 / 规格 / 圆形 + 按钮；
+ *           底部悬浮白色胶囊工具条，右端一个深色圆形 → 按钮。
+ *   - 配色：薄荷青绿 #35cfbd / 玉米黄 #ffc44d / 紫 #8b6cf0 轮换，黑字、大留白、几乎不用阴影。
+ *   - 动效：右侧切换 → 左侧色块 rotate(-28deg) scale(.08) 弹性展开（1.08 overshoot），
+ *           旧块 rotate(16deg) scale(1.35) 模糊淡出，标题 scaleX(1.6) 挤压回弹，
+ *           主体图形 rotate(-42deg) scale(.35) 旋转放大进场。总时长 0.45~0.55s。
+ *
+ * BV1Zg411C7D4《后台管理系统动效设计灵感》22s，30fps
+ *   - 2.8~3.6s：右下角圆形开关 → 巨大白色圆形 scale 扩散覆盖整页，把暗色擦成亮色。
+ *   - 4.8~6.2s：右侧 › 切换 → 左侧卡片 rotate(±13deg)+scale(1.08~1.15) + 3 层堆叠残影，
+ *                旧卡向左后旋出 + blur 淡出，新卡从右侧 rotate(14deg)+scale(.78) 旋转放大进入，0.26~0.35s 归位。
+ *   - 19.0~19.8s：整块仪表盘 rotateY 翻面，切到暗色主题。
+ *   - 版式：极浅灰底 / 纯白大圆角卡 / 饱和蓝 #3b7bff / 胶囊控件 / 亮暗双主题。
+ *
+ * 约束：所有类以 tk- 前缀隔离；只在 .tk-scope 内修饰 Hydro 自带组件，不全局覆盖 ui-default。
+ * 注意：入场动画必须 backwards，用 both 会在结束后压住 hover 的 transform。
+ *
+ * 边缘层级（v4：全局黑墨风格 —— 蓝色清零，强调一律墨黑；暗色主题反转为近白）：
+ *   L0 容器 —— 1px --tk-border 发丝线，无光晕；
+ *   L1 hover —— 描边升到 --tk-border-strong，底色升到 --tk-surface-2，不染色；
+ *   L2 焦点 —— 描边 --tk-primary + 3px --tk-primary-soft 实色环（双描边，不是发光）；
+ *   L3 一级强调 —— 墨黑实色/渐变填充（--tk-primary），文字用 --tk-on-primary 保证对比度；
+ *     主按钮、active tab，每个操作区至多一处；次级提交用 --tk-ink 墨丸（tk-btn--ink）。
+ *   语义色（薄荷/黄/紫 = 三分类，状态色 = 五状态，其中「处理中」用石墨黑）只染小面积标记。
+ *   禁止：半透明扩散光环（0 0 0 Nx）、彩色发光阴影、hover 整件染色。
+ */
+
+/* ---------- 设计令牌（封面 2 的配色） ---------- */
+:root {
+  --tk-bg: #f2f4f8;
+  --tk-surface: #ffffff;
+  --tk-surface-2: #f8f9fb;
+  --tk-border: #e9ecf1;
+  --tk-border-strong: #dde2ea;
+  --tk-text: #14171d;
+  --tk-text-2: #626c7d;
+  --tk-text-3: #9aa4b2;
+  /* v4：全局黑墨风格 —— 强调色一律墨黑，不再有蓝色；
+     暗色主题下 primary 反转为近白（反色墨），配合 --tk-on-primary 保证按钮文字对比度。 */
+  --tk-primary: #14171d;
+  --tk-primary-2: #2e3440;
+  --tk-primary-soft: #edeff3;
+  --tk-ink: #1d2330;
+  --tk-on-primary: #ffffff;
+  --tk-pink: #f9dce6;
+  --tk-mint: #35cfbd;
+  /* 阴影克制：参考视频里只有极轻投影，层级靠发丝线和留白，不靠大阴影 */
+  --tk-shadow: 0 1px 2px rgba(20, 30, 50, .05);
+  --tk-shadow-hover: 0 2px 6px rgba(20, 30, 50, .07);
+  --tk-shadow-pill: 0 1px 3px rgba(20, 30, 50, .10);
+  --tk-radius: 22px;
+  --tk-radius-sm: 12px;
+  --tk-ease: cubic-bezier(.22, .68, .35, 1);
+  --tk-spring: cubic-bezier(.18, .9, .24, 1.06);
+  --tk-hero: linear-gradient(112deg, #ffffff 0%, #f7f9fc 60%, #f2fbf9 100%);
+
+  --tk-glass: rgba(255, 255, 255, .82);
+  --tk-glass-border: rgba(255, 255, 255, .95);
+  --tk-glass-2: rgba(248, 249, 251, .7);
+  --tk-link-strong: #14171d;
+  --tk-pending-rgb: 245, 165, 36;
+  --tk-processing-rgb: 58, 63, 71;
+  --tk-replied-rgb: 145, 103, 232;
+  --tk-closed-rgb: 154, 165, 182;
+  --tk-done-rgb: 53, 207, 189;
+  --tk-pending: #b1700a;
+  --tk-processing: #3a3f47;
+  --tk-replied: #7547cf;
+  --tk-closed: #78839a;
+  --tk-done: #0d8a78;
+}
+
+/* 暗色：跟随系统偏好 / 站点标记 / 圆形扩散按钮（局部 tk-dark）。
+   刻意保持纯 CSS，不依赖任何 postcss 预处理插件，Hydro 的 css-loader 链可直接编译。 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --tk-bg: #111827; --tk-surface: #1b2433; --tk-surface-2: #212c3d;
+    --tk-border: #2c3850; --tk-border-strong: #3c4c69;
+    --tk-text: #edf2fb; --tk-text-2: #aab7cd; --tk-text-3: #7e8ca5;
+    --tk-primary: #e8edf6; --tk-primary-2: #c3ccda;
+    --tk-primary-soft: rgba(232,237,246,.14); --tk-ink: #e8edf6;
+    --tk-on-primary: #14171d;
+    --tk-shadow: 0 1px 2px rgba(0,0,0,.28);
+    --tk-shadow-hover: 0 2px 6px rgba(0,0,0,.36);
+    --tk-hero: linear-gradient(112deg, #1b2433 0%, #182336 60%, #17342f 100%);
+    --tk-glass: rgba(27,36,51,.82); --tk-glass-border: rgba(60,76,105,.7);
+    --tk-glass-2: rgba(33,44,61,.7);
+    --tk-link-strong: #e8edf6; --tk-processing-rgb: 168, 180, 198;
+    --tk-pending: #ffc978; --tk-processing: #d7dee8; --tk-replied: #c3a6ff;
+    --tk-closed: #8b96a9; --tk-done: #6fe0cb;
+  }
+}
+html.dark, html[data-theme="dark"], html.theme--dark,
+body.dark, body[data-theme="dark"], body.theme--dark,
+.tk-shell.tk-dark {
+  --tk-bg: #111827; --tk-surface: #1b2433; --tk-surface-2: #212c3d;
+  --tk-border: #2c3850; --tk-border-strong: #3c4c69;
+  --tk-text: #edf2fb; --tk-text-2: #aab7cd; --tk-text-3: #7e8ca5;
+  --tk-primary: #e8edf6; --tk-primary-2: #c3ccda;
+  --tk-primary-soft: rgba(232,237,246,.14); --tk-ink: #e8edf6;
+  --tk-on-primary: #14171d;
+  --tk-shadow: 0 1px 2px rgba(0,0,0,.26);
+  --tk-shadow-hover: 0 2px 6px rgba(0,0,0,.34);
+  --tk-hero: linear-gradient(112deg, #1b2433 0%, #182336 60%, #17342f 100%);
+  --tk-glass: rgba(27,36,51,.82); --tk-glass-border: rgba(60,76,105,.7);
+  --tk-glass-2: rgba(33,44,61,.7);
+  --tk-link-strong: #e8edf6; --tk-processing-rgb: 168, 180, 198;
+  --tk-pending: #ffc978; --tk-processing: #d7dee8; --tk-replied: #c3a6ff;
+  --tk-closed: #8b96a9; --tk-done: #6fe0cb;
+}
+
+/* ---------- 动效基元 ---------- */
+@keyframes tk-rise {
+  from { opacity: 0; transform: translateY(14px) scale(.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes tk-float {
+  from { transform: translate3d(0, 0, 0) rotate(0deg); }
+  to { transform: translate3d(-18px, 14px, 0) rotate(24deg); }
+}
+/* 呼吸用透明度+微缩放，不用扩散光环——发光边环视觉噪音大 */
+@keyframes tk-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .62; transform: scale(.86); }
+}
+@keyframes tk-shine {
+  from { transform: translateX(-120%) skewX(-18deg); }
+  to { transform: translateX(240%) skewX(-18deg); }
+}
+
+/* A-1 · storehouse 色块：从左上旋转 + 微小圆点弹性展开，带 overshoot
+   （方向依据 6.10s / 6.20s 帧：新绿色块由左上角切入，把黄色块挤向左下） */
+@keyframes tk-blob-in {
+  0% {
+    transform: translate(-30%, -26%) rotate(-28deg) scale(.08);
+    border-radius: 50%; opacity: .6;
+  }
+  52% {
+    transform: translate(-2%, 1%) rotate(7deg) scale(1.08);
+    border-radius: 46% 54% 40% 60% / 52% 44% 56% 48%; opacity: 1;
+  }
+  76% { transform: translate(1%, 0) rotate(-2.5deg) scale(.985); }
+  100% {
+    transform: translate(0, 0) rotate(0deg) scale(1);
+    border-radius: 42% 58% 36% 64% / 54% 42% 58% 46%; opacity: 1;
+  }
+}
+/* A-2 · 旧色块被新块挤出去：向右下旋转缩小 + 模糊淡出（让新块的展开过程可见） */
+@keyframes tk-blob-out {
+  0% { transform: rotate(0) scale(1); opacity: .95; filter: blur(0); }
+  100% { transform: translate(16%, 10%) rotate(16deg) scale(.76); opacity: 0; filter: blur(7px); }
+}
+/* A-3 · 大标题被横向挤压后回弹（视频里 "Blob sofa" → "Herb pods" 的字形拉伸） */
+@keyframes tk-title-squash {
+  0% { transform: scaleX(1.6) translateX(-15%); opacity: 0; filter: blur(3px); }
+  44% { transform: scaleX(.93) translateX(2%); opacity: 1; filter: blur(0); }
+  72% { transform: scaleX(1.035) translateX(-.5%); }
+  100% { transform: scaleX(1) translateX(0); opacity: 1; }
+}
+@keyframes tk-sub-squash {
+  0% { transform: scaleX(1.35) translateX(-10%); opacity: 0; }
+  55% { transform: scaleX(.97) translateX(1%); opacity: 1; }
+  100% { transform: scaleX(1) translateX(0); opacity: 1; }
+}
+/* A-4 · 主体图形旋转放大进场 */
+@keyframes tk-art-in {
+  0% { transform: rotate(-42deg) scale(.35) translateY(26px); opacity: 0; }
+  58% { transform: rotate(9deg) scale(1.12); opacity: 1; }
+  100% { transform: rotate(0deg) scale(1) translateY(0); opacity: 1; }
+}
+/* A-5 · 字段区 3D 抬入 */
+@keyframes tk-fields-in {
+  0% { transform: perspective(700px) rotateX(-9deg) scale(.96) translateY(16px); opacity: 0; }
+  62% { transform: perspective(700px) rotateX(2deg) scale(1.01) translateY(-2px); opacity: 1; }
+  100% { transform: perspective(700px) rotateX(0) scale(1) translateY(0); opacity: 1; }
+}
+@keyframes tk-cat-bump {
+  0% { transform: scale(1); }
+  45% { transform: rotate(-1.4deg) scale(1.018); }
+  100% { transform: rotate(0) scale(1); }
+}
+
+/* B · 卡片堆叠旋转切换（视频 1 的 4.8~6.2s） */
+@keyframes tk-card-out {
+  0% { transform: translateX(0) rotate(0) scale(1); opacity: 1; filter: blur(0); }
+  100% { transform: translateX(-36px) rotate(-13deg) scale(.8); opacity: 0; filter: blur(4px); }
+}
+@keyframes tk-card-in {
+  0% { transform: translateX(42px) rotate(14deg) scale(.78); opacity: 0; filter: blur(3px); }
+  54% { transform: translateX(-5px) rotate(-3deg) scale(1.09); opacity: 1; filter: blur(0); }
+  100% { transform: translateX(0) rotate(0) scale(1); opacity: 1; }
+}
+@keyframes tk-deck-shake {
+  0%, 100% { transform: translateY(0); }
+  45% { transform: translateY(-4px) rotate(1.5deg); }
+}
+
+/* C · 圆形扩散主题切换（视频 1 的 2.8~3.6s） */
+@keyframes tk-reveal {
+  from { clip-path: circle(0px at var(--rx) var(--ry)); }
+  to { clip-path: circle(150% at var(--rx) var(--ry)); }
+}
+
+.tk-rise, .tk-card, .tk-row, .tk-tl-item, .tk-reply, .tk-fv, .tk-quick__btn {
+  animation: tk-rise .5s var(--tk-ease) backwards;
+  animation-delay: calc(var(--i, 0) * 55ms);
+}
+
+/* ---------- 页面外壳 / 顶栏 ---------- */
+.tk-shell {
+  position: relative;
+  box-sizing: border-box;
+  padding: 22px;
+  border: 1px solid var(--tk-border);
+  border-radius: 30px;
+  background: var(--tk-bg);
+  color: var(--tk-text);
+  isolation: isolate;
+  animation: tk-rise .45s var(--tk-ease) backwards;
+}
+.tk-top {
+  display: flex; flex-wrap: wrap; gap: 18px;
+  align-items: flex-start; justify-content: space-between;
+  padding: 4px 4px 20px;
+}
+.tk-top__eyebrow {
+  font-size: 11px; font-weight: 700; letter-spacing: .14em;
+  color: var(--tk-text-3); text-transform: uppercase;
+}
+.tk-top__title {
+  margin: 7px 0 5px; font-size: 34px; font-weight: 700;
+  letter-spacing: -1.4px; line-height: 1.15; color: var(--tk-text);
+}
+.tk-top__sub { margin: 0; font-size: 13px; color: var(--tk-text-2); }
+.tk-top__right { display: flex; align-items: center; gap: 14px; }
+.tk-top__nav { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; }
+.tk-top__nav a { color: var(--tk-text-2); text-decoration: none; }
+.tk-top__nav a:hover { color: var(--tk-link-strong); text-decoration: underline; }
+
+/* 圆形主题开关：对应视频 1 右下角那个白圆 */
+.tk-theme {
+  flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%;
+  border: 1px solid var(--tk-border-strong); background: var(--tk-surface);
+  color: var(--tk-text); font-size: 17px; line-height: 1; cursor: pointer;
+  box-shadow: none;
+  transition: transform .3s var(--tk-spring), border-color .25s;
+}
+.tk-theme:hover { transform: rotate(28deg) scale(1.1); border-color: var(--tk-border-strong); }
+/* 扩散层：从按钮圆心铺开，中途由 JS 切换 tk-dark */
+.tk-reveal {
+  --tk-reveal-bg: #f4f6fa;
+  position: absolute; inset: 0; z-index: 40; pointer-events: none;
+  border-radius: inherit; background: var(--tk-reveal-bg);
+  clip-path: circle(0px at var(--rx) var(--ry));
+  animation: tk-reveal .68s cubic-bezier(.55, .05, .25, 1) forwards;
+}
+
+/* Hero：收敛的白底 + 极淡光斑，不再堆渐变 */
+.tk-hero {
+  position: relative; overflow: hidden; box-sizing: border-box;
+  padding: 26px 30px; margin-bottom: 20px;
+  border: 1px solid var(--tk-border); border-radius: 26px;
+  background: var(--tk-hero); isolation: isolate;
+}
+.tk-hero::before {
+  content: ''; position: absolute; z-index: -1; top: -100px; right: -60px;
+  width: 320px; height: 320px;
+  border-radius: 46% 54% 38% 62% / 55% 42% 58% 45%;
+  background: radial-gradient(circle at 34% 34%, rgba(53, 207, 189, .3), rgba(53, 207, 189, 0) 72%);
+  filter: blur(10px); animation: tk-float 9s ease-in-out infinite alternate;
+}
+.tk-hero::after {
+  content: ''; position: absolute; z-index: -1; inset: 0;
+  background: radial-gradient(320px circle at var(--mx, 78%) var(--my, 30%), rgba(20, 30, 50, .05), transparent 72%);
+  transition: background .25s linear;
+}
+.tk-hero__inner { position: relative; z-index: 1; }
+.tk-hero__eyebrow {
+  display: inline-flex; align-items: center; gap: 7px; margin-bottom: 10px;
+  font-size: 11px; font-weight: 700; letter-spacing: .12em;
+  color: var(--tk-text-3); text-transform: uppercase;
+}
+.tk-hero__eyebrow::before {
+  content: ''; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--tk-accent, var(--tk-mint));
+  animation: tk-pulse 2.4s ease-in-out infinite;
+}
+.tk-hero__title {
+  margin: 0 0 7px; font-size: 31px; line-height: 1.2; font-weight: 700;
+  letter-spacing: -1.2px; color: var(--tk-text);
+}
+.tk-hero__sub { margin: 0; font-size: 13px; color: var(--tk-text-2); }
+.tk-hero__chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.tk-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 13px;
+  border-radius: 999px; border: 1px solid var(--tk-border);
+  background: var(--tk-surface); font-size: 12px; font-weight: 600; color: var(--tk-text-2);
+}
+.tk-chip strong { color: var(--tk-text); font-size: 14px; }
+.tk-chip--mint { border-color: rgba(var(--tk-done-rgb), .34); }
+.tk-chip--mint strong { color: var(--tk-done); }
+.tk-chip--ghost { background: transparent; border-style: dashed; }
+
+/* ---------- Hero 右侧视觉锚点：流体色块 + 3D 黏土物件（storehouse 语言） ---------- */
+.tk-hero--art {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, 330px);
+  align-items: center; gap: 18px;
+}
+.tk-hero--art::before { display: none; }  /* 淡渐变斑让位给真色块 */
+.tk-hero--statement { --tk-accent: #35cfbd; }
+.tk-hero--data { --tk-accent: #ffc44d; }
+.tk-hero--difficulty { --tk-accent: #8b6cf0; }
+.tk-hero__art { position: relative; height: 232px; }
+.tk-hero__blob {
+  position: absolute; inset: -12% -12% -14% -8%;
+  background: var(--tk-accent, var(--tk-primary));
+  border-radius: 46% 54% 40% 60% / 56% 42% 58% 44%;
+  animation: tk-blob-in .62s var(--tk-spring) both, tk-float 10s .8s ease-in-out infinite alternate;
+}
+.tk-hero__img {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+  filter: drop-shadow(0 18px 22px rgba(20, 30, 50, .18));
+}
+.tk-hero__art > .tk-hero__img { animation: tk-art-in .62s var(--tk-spring) both; animation-delay: .16s; }
+
+/* 列表页：三色小色块托着三件黏土物件错落排布（呼应三个反馈分类） */
+.tk-hero__art--trio .tk-hero__chip3 {
+  position: absolute; display: block;
+  border-radius: 44% 56% 38% 62% / 55% 43% 57% 45%;
+  animation: tk-pop .62s var(--tk-spring) both;
+}
+.tk-hero__chip3--a { --tilt: -7deg; width: 56%; height: 56%; left: -2%; top: 1%; background: #35cfbd; animation-delay: .06s; z-index: 2; }
+.tk-hero__chip3--b { --tilt: 6deg; width: 50%; height: 52%; right: -3%; top: -5%; background: #ffc44d; animation-delay: .18s; z-index: 1; }
+.tk-hero__chip3--c { --tilt: 3deg; width: 55%; height: 55%; left: 26%; bottom: -6%; background: #8b6cf0; animation-delay: .3s; z-index: 3; }
+.tk-hero__chip3 img {
+  width: 100%; height: 100%; object-fit: contain; padding: 9%;
+  filter: drop-shadow(0 12px 16px rgba(20, 30, 50, .16));
+}
+/* 错峰弹入：关键帧里保持各自倾角，结束后与静态 transform 无缝衔接 */
+@keyframes tk-pop {
+  0% { opacity: 0; transform: translateY(18px) scale(.55) rotate(var(--tilt, 0deg)); }
+  58% { opacity: 1; transform: translateY(-3px) scale(1.06) rotate(var(--tilt, 0deg)); }
+  100% { opacity: 1; transform: translateY(0) scale(1) rotate(var(--tilt, 0deg)); }
+}
+
+/* ---------- 卡片化 section：大圆角、几乎不用阴影 ---------- */
+.tk-scope .section.tk-card {
+  margin-bottom: 18px;
+  border: 1px solid var(--tk-border);
+  border-radius: var(--tk-radius);
+  background: var(--tk-surface);
+  box-shadow: none;
+  overflow: hidden;
+  transition: border-color .28s;
+}
+/* 扁平设计：不悬浮、不放大阴影，只用边框变色提示 */
+.tk-scope .section.tk-card:hover { border-color: var(--tk-border-strong); }
+.tk-scope .section.tk-card > .section__header {
+  padding: 16px 24px; margin: 0; border-bottom: 1px solid var(--tk-border); background: transparent;
+}
+.tk-scope .section.tk-card > .section__header .section__title {
+  margin: 0; font-size: 15px; font-weight: 700; color: var(--tk-text); letter-spacing: -.2px;
+}
+.tk-scope .section.tk-card > .section__body { padding: 22px 24px; }
+.tk-scope .section.tk-card > .section__body.typo { color: var(--tk-text-2); }
+.tk-scope .section.side.tk-card > .section__body { padding: 18px 20px; }
+.tk-scope .section.tk-card .section__body > p:first-child { margin-top: 0; }
+.tk-scope .section.tk-card .section__body > p:last-child { margin-bottom: 0; }
+.tk-scope .section.tk-card.is-focus {
+  animation: tk-fields-in .6s var(--tk-spring);
+  border-color: var(--tk-accent, var(--tk-border-strong));
+}
+
+/* ---------- 通用文字 / 表单控件 ---------- */
+.tk-sub { margin-left: 10px; font-size: 13px; font-weight: 400; color: var(--tk-text-3); }
+.tk-dim { color: var(--tk-text-3); font-size: 12px; }
+.tk-req { color: #f05a6b; }
+.tk-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: nowrap; }
+.tk-crumb { margin-bottom: 18px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tk-crumb a { color: var(--tk-link-strong); text-decoration: none; }
+.tk-crumb a:hover { text-decoration: underline; }
+.tk-crumb__sep { color: var(--tk-border-strong); }
+.tk-label { display: block; margin: 20px 0 10px; font-size: 13px; font-weight: 700; color: var(--tk-text); }
+.tk-label:first-child { margin-top: 0; }
+.tk-h3 { margin: 22px 0 10px; font-size: 14px; font-weight: 700; color: var(--tk-text); }
+.tk-kicker { font-size: 10px; font-weight: 700; letter-spacing: .16em; color: var(--tk-text-3); text-transform: uppercase; }
+.tk-scope .textbox, .tk-scope .select {
+  box-sizing: border-box;
+  border: 1px solid var(--tk-border-strong);
+  border-radius: var(--tk-radius-sm);
+  background: var(--tk-surface); color: var(--tk-text);
+  box-shadow: 0 1px 2px rgba(20, 30, 50, .03) inset;
+  transition: border-color .2s, box-shadow .2s;
+}
+.tk-scope .textbox:focus, .tk-scope .select:focus {
+  border-color: var(--tk-primary); box-shadow: 0 0 0 3px var(--tk-primary-soft); outline: none;
+}
+.tk-scope .textbox:hover:not(:focus), .tk-scope .select:hover:not(:focus) { border-color: var(--tk-border-strong); }
+.tk-scope .section__body a:not([class]) { color: var(--tk-link-strong); }
+.tk-scope .section__body a:not([class]):hover { text-decoration: underline; }
+
+/* 按钮：克制的蓝色胶囊；主按钮是深色圆角胶囊（对应封面里的深色 → 按钮） */
+.tk-scope .tk-btn {
+  position: relative; overflow: hidden;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 20px; border-radius: 999px;
+  font-size: 13px; font-weight: 600; line-height: 1.4;
+  text-decoration: none; cursor: pointer;
+  transition: transform .22s var(--tk-ease), box-shadow .22s var(--tk-ease), background .22s, color .22s, border-color .22s;
+}
+.tk-scope .tk-btn:hover { transform: none; }
+.tk-scope .tk-btn:active { transform: translateY(0) scale(.98); }
+.tk-scope .tk-btn--sm { padding: 7px 15px; font-size: 12px; }
+.tk-scope .tk-btn.tk-btn--primary {
+  border: 1px solid transparent; color: var(--tk-on-primary);
+  background: linear-gradient(135deg, var(--tk-primary), var(--tk-primary-2));
+  box-shadow: var(--tk-shadow-pill);
+}
+.tk-scope .tk-btn.tk-btn--primary:hover { box-shadow: 0 2px 8px rgba(20, 30, 50, .18); color: var(--tk-on-primary); }
+.tk-scope .tk-btn--primary::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .35), transparent);
+  transform: translateX(-120%) skewX(-18deg);
+}
+.tk-scope .tk-btn--primary:hover::after { animation: tk-shine .8s var(--tk-ease); }
+.tk-scope .tk-btn.tk-btn--ghost {
+  border: 1px solid var(--tk-border-strong); color: var(--tk-text-2); background: var(--tk-surface);
+}
+.tk-scope .tk-btn.tk-btn--ghost:hover {
+  border-color: var(--tk-border-strong); color: var(--tk-text); background: var(--tk-surface-2);
+}
+/* 深色墨丸：视频底部那个深色圆 → 按钮的语言，用于次级提交（一屏只留一个蓝实底） */
+.tk-scope .tk-btn.tk-btn--ink {
+  border: 1px solid transparent; color: var(--tk-surface);
+  background: var(--tk-ink); box-shadow: var(--tk-shadow-pill);
+}
+.tk-scope .tk-btn.tk-btn--ink:hover { color: var(--tk-surface); box-shadow: 0 2px 8px rgba(20, 30, 50, .18); }
+
+/* ==========================================================================
+   新建页 · storehouse 双栏：左舞台 / 右选择列表
+   参考 BV14Q4y1z7bW 封面与 5.0~8.4s 逐帧
+   ========================================================================== */
+.tk-board {
+  --tk-cat-statement: #35cfbd;
+  --tk-cat-data: #ffc44d;
+  --tk-cat-difficulty: #8b6cf0;
+  --tk-accent: var(--tk-cat-statement);
+  --tk-accent-ink: #ffffff;
+  display: grid; grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr);
+  box-sizing: border-box; overflow: hidden;
+  border: 1px solid var(--tk-border); border-radius: 28px;
+  background: var(--tk-surface); box-shadow: var(--tk-shadow);
+}
+.tk-board[data-active="data"] { --tk-accent: var(--tk-cat-data); --tk-accent-ink: #3a2c08; }
+.tk-board[data-active="difficulty"] { --tk-accent: var(--tk-cat-difficulty); }
+
+/* --- 左：大色块舞台 --- */
+.tk-stage {
+  position: relative; min-height: 560px; box-sizing: border-box;
+  padding: 34px; overflow: hidden; isolation: isolate;
+  background: var(--tk-surface-2);
+}
+.tk-stage__blob {
+  position: absolute; z-index: -2;
+  top: -14%; left: -20%; width: 132%; height: 128%;
+  background: var(--tk-accent);
+  border-radius: 42% 58% 36% 64% / 54% 42% 58% 46%;
+  transform-origin: 38% 30%;
+  transition: background .35s linear;
+}
+/* 新块层级高于旋出的旧块，中间帧能同时看到「小黄圆展开 + 青绿块退走」 */
+.tk-stage__blob.is-enter { z-index: -1; animation: tk-blob-in .56s var(--tk-spring) both; }
+.tk-stage__blob--out {
+  z-index: -2; top: -14%; left: -20%; width: 132%; height: 128%;
+  border-radius: 42% 58% 36% 64% / 54% 42% 58% 46%;
+  transform-origin: 38% 30%;
+  animation: tk-blob-out .52s cubic-bezier(.4, 0, .7, .4) both;
+}
+/* 三层堆叠残影，呼应视频 1 的卡片 stack */
+.tk-stage__stack { position: absolute; z-index: -3; right: 6%; bottom: 10%; width: 44%; height: 34%; }
+.tk-stage__stack i {
+  position: absolute; display: block; inset: 0; border-radius: 30px;
+  background: rgba(255, 255, 255, .16); border: 1px solid rgba(255, 255, 255, .22);
+}
+.tk-stage__stack i:nth-child(1) { transform: translate(16px, 14px) rotate(7deg); }
+.tk-stage__stack i:nth-child(2) { transform: translate(8px, 7px) rotate(3.5deg); }
+.tk-stage.is-swap .tk-stage__stack { animation: tk-deck-shake .5s var(--tk-spring); }
+.tk-stage__inner { position: relative; z-index: 1; display: flex; flex-direction: column; height: 100%; min-height: 490px; }
+.tk-stage__kicker {
+  font-size: 10px; font-weight: 700; letter-spacing: .18em;
+  color: var(--tk-accent-ink); opacity: .78; text-transform: uppercase;
+}
+.tk-stage__title {
+  margin: 22px 0 8px; font-size: 42px; line-height: 1.08; font-weight: 700;
+  letter-spacing: -1.8px; color: var(--tk-accent-ink); transform-origin: left center;
+}
+.tk-stage__title.is-enter { animation: tk-title-squash .52s var(--tk-spring) both; }
+.tk-stage__desc {
+  margin: 0; max-width: 260px; font-size: 13px; line-height: 1.7;
+  color: var(--tk-accent-ink); opacity: .86; transform-origin: left center;
+}
+.tk-stage__desc.is-enter { animation: tk-sub-squash .48s var(--tk-spring) both; animation-delay: .04s; }
+/* 主体图形：AI 生成的 3D 黏土渲染物件（透明底 webp，随分类切换），对应参考里的沙发 / 植物模型 */
+.tk-stage__art {
+  position: relative; align-self: flex-end; margin-top: 34px; margin-right: -6px;
+  width: 252px; height: 236px; transform-origin: 60% 70%;
+}
+.tk-stage__art.is-enter { animation: tk-art-in .6s var(--tk-spring) both; animation-delay: .06s; }
+.tk-stage__img {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+  opacity: 0; transition: opacity .38s var(--tk-ease);
+  filter: drop-shadow(0 22px 26px rgba(20, 30, 50, .16));
+}
+.tk-stage__img.is-on { opacity: 1; }
+.tk-stage__foot {
+  display: flex; align-items: center; gap: 10px; margin-top: auto;
+  font-size: 10px; font-weight: 700; letter-spacing: .14em;
+  color: var(--tk-accent-ink); opacity: .78;
+}
+.tk-stage__dot { font-size: 18px; line-height: 1; }
+
+/* --- 右：细分割线选择列表 --- */
+.tk-picker { display: flex; flex-direction: column; padding: 32px 34px 26px; min-width: 0; }
+.tk-picker__head { margin-bottom: 20px; }
+.tk-picker__head h2 {
+  margin: 8px 0 5px; font-size: 25px; font-weight: 700; letter-spacing: -.9px; color: var(--tk-text);
+}
+.tk-picker__head p { margin: 0; }
+.tk-cats { display: flex; flex-direction: column; }
+.tk-cat {
+  position: relative; display: flex; align-items: center; box-sizing: border-box;
+  width: 100%; padding: 16px 2px; border: 0; border-top: 1px solid var(--tk-border);
+  background: transparent; cursor: pointer;
+  transition: padding-left .3s var(--tk-ease), background .25s;
+}
+.tk-cat:last-child { border-bottom: 1px solid var(--tk-border); }
+.tk-cat:hover { padding-left: 9px; }
+.tk-cat.is-bump { animation: tk-cat-bump .42s var(--tk-spring); }
+.tk-cat > input[type="radio"] { position: absolute; width: 0; height: 0; opacity: 0; }
+.tk-cat__dot {
+  position: relative; flex: 0 0 26px; width: 26px; height: 26px; margin-right: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+/* ⚪ 用 CSS 画标准空心圆，避免各平台 emoji 字形在浅底上发灰 */
+.tk-cat__glyph {
+  display: inline-block; box-sizing: border-box;
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 2px solid var(--tk-text-3);
+  color: transparent; font-size: 0; line-height: 1;
+  transition: border-color .25s, opacity .25s, transform .35s var(--tk-spring);
+}
+/* 三个分类各自的语义色（与左舞台色块同源），选中态不再全局泛蓝 */
+.tk-cat[data-category="statement"] { --tk-cat-c: #35cfbd; --tk-cat-ink: #0b4a42; }
+.tk-cat[data-category="data"] { --tk-cat-c: #ffc44d; --tk-cat-ink: #4a3708; }
+.tk-cat[data-category="difficulty"] { --tk-cat-c: #8b6cf0; --tk-cat-ink: #fff; }
+.tk-cat__core {
+  position: absolute; width: 11px; height: 11px; border-radius: 50%;
+  background: var(--tk-cat-c, var(--tk-primary)); opacity: 0; transform: scale(.3);
+  transition: opacity .25s, transform .35s var(--tk-spring);
+}
+.tk-cat.active .tk-cat__glyph { border-color: var(--tk-cat-c, var(--tk-primary)); opacity: .38; transform: scale(1.15); }
+.tk-cat.active .tk-cat__core { opacity: 1; transform: scale(1); }
+.tk-cat__body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tk-cat__title { font-size: 15px; font-weight: 700; color: var(--tk-text); }
+.tk-cat__hint { font-size: 12px; color: var(--tk-text-3); }
+/* ⚪ 长线条：选中时从 0.6 延伸到 1 并染成主色 */
+.tk-cat__line {
+  flex: 1 1 auto; height: 1px; margin-left: 18px;
+  background: linear-gradient(to right, var(--tk-border-strong), rgba(221, 226, 234, 0));
+  transform-origin: left center; transform: scaleX(.6);
+  transition: transform .4s var(--tk-ease), background .3s;
+}
+.tk-cat:hover .tk-cat__line { transform: scaleX(.85); }
+.tk-cat.active .tk-cat__line {
+  transform: scaleX(1);
+  background: linear-gradient(to right, var(--tk-cat-c, var(--tk-primary)), transparent);
+}
+.tk-cat__plus {
+  flex: 0 0 auto; margin-left: 14px; width: 26px; height: 26px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--tk-border-strong); color: var(--tk-text-2);
+  font-size: 15px; font-weight: 600; line-height: 1;
+  transition: transform .34s var(--tk-spring), background .25s, color .25s, border-color .25s;
+}
+.tk-cat.active .tk-cat__plus {
+  transform: rotate(135deg); border-color: var(--tk-cat-c, var(--tk-primary));
+  background: var(--tk-cat-c, var(--tk-primary)); color: var(--tk-cat-ink, #fff);
+}
+
+/* 动态字段区：切换时 3D 抬入 */
+/* 固定字段区最小高度，切换分类时 board 不会跟着抖 */
+.tk-fieldzone { margin-top: 24px; min-height: 300px; }
+.tk-fieldzone.is-enter { animation: tk-fields-in .5s var(--tk-spring) both; }
+.tk-fieldzone__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.tk-fields {
+  display: grid; grid-template-columns: 1fr; gap: 10px; min-height: 232px;
+  padding: 14px; border: 1px solid var(--tk-border); border-radius: 16px; background: var(--tk-surface-2);
+}
+.tk-fields[hidden] { display: none; }
+.tk-field { min-width: 0; }
+.tk-field--wide { grid-column: 1 / -1; }
+.tk-field__label { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 700; color: var(--tk-text-2); }
+.tk-field textarea.textbox { min-height: 72px; resize: vertical; }
+
+/* 浮动胶囊工具条（封面 2 底部那个白药丸 + 深色圆按钮） */
+.tk-dock {
+  display: flex; align-items: center; gap: 9px; margin-top: auto; padding: 9px 9px 9px 18px;
+  border: 1px solid var(--tk-border); border-radius: 999px; background: var(--tk-surface);
+  box-shadow: 0 2px 8px rgba(20, 30, 50, .06);
+}
+.tk-dock__step { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--tk-text-2); }
+.tk-dock__step b {
+  display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px;
+  border-radius: 50%; background: var(--tk-surface-2); color: var(--tk-text-2); font-size: 10px;
+  border: 1px solid var(--tk-border-strong);
+}
+.tk-dock__dash { width: 16px; height: 1px; background: var(--tk-border-strong); }
+.tk-dock__go {
+  margin-left: auto; flex: 0 0 auto; width: 38px; height: 38px; border-radius: 50%;
+  border: 0; background: var(--tk-ink); color: #fff; font-size: 17px; cursor: pointer;
+  transition: transform .32s var(--tk-spring), box-shadow .25s;
+}
+.tk-dock__go:hover { transform: rotate(-35deg) scale(1.12); box-shadow: 0 3px 10px rgba(20, 30, 50, .22); }
+.tk-actions { margin-top: 24px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.tk-check { display: flex; align-items: center; gap: 8px; margin: 10px 0 16px; font-size: 13px; color: var(--tk-text-2); }
+.tk-check input { accent-color: var(--tk-primary); }
+
+/* ---------- 列表页：细分割线行列表 ---------- */
+.tk-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.tk-tab {
+  padding: 8px 17px; border: 1px solid var(--tk-border-strong); border-radius: 999px;
+  font-size: 13px; font-weight: 600; color: var(--tk-text-2); text-decoration: none; background: var(--tk-surface);
+  transition: transform .22s var(--tk-ease), box-shadow .22s, color .22s, background .22s, border-color .22s;
+}
+.tk-tab:hover { border-color: var(--tk-border-strong); color: var(--tk-text); }
+.tk-tab.active {
+  border-color: transparent; color: var(--tk-on-primary);
+  background: linear-gradient(135deg, var(--tk-primary), var(--tk-primary-2)); box-shadow: var(--tk-shadow-pill);
+}
+.tk-filter {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  padding: 14px 16px; margin-bottom: 18px;
+  border: 1px solid var(--tk-border); border-radius: var(--tk-radius-sm); background: var(--tk-surface-2);
+}
+.tk-filter__ctl { width: auto; min-width: 140px; margin: 0; }
+.tk-filter__pid { max-width: 160px; }
+.tk-list { display: flex; flex-direction: column; border: 1px solid var(--tk-border); border-radius: 16px; overflow: hidden; }
+.tk-row {
+  position: relative; display: flex; align-items: center; gap: 14px; box-sizing: border-box;
+  padding: 16px 20px; border: 0; border-bottom: 1px solid var(--tk-border);
+  border-radius: 0; background: var(--tk-surface); box-shadow: none;
+  transition: background .22s, padding-left .28s var(--tk-ease);
+}
+.tk-row:last-child { border-bottom: 0; }
+.tk-row:hover { padding-left: 26px; background: var(--tk-surface-2); transform: none; box-shadow: none; }
+.tk-row__dot {
+  flex: 0 0 10px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--tk-text-3);
+}
+.tk-dot--pending { background: #f5a524; }
+.tk-dot--processing { background: #4a525e; animation: tk-pulse 2.8s ease-in-out infinite; }
+.tk-dot--replied { background: #9167e8; }
+.tk-dot--closed { background: #9aa5b6; }
+.tk-dot--done { background: var(--tk-mint); }
+.tk-row__main { flex: 1 1 auto; min-width: 0; }
+.tk-row__title {
+  display: block; font-size: 14px; font-weight: 700; color: var(--tk-text); text-decoration: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tk-row__title:hover { color: var(--tk-link-strong); }
+.tk-row__meta { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 12px; color: var(--tk-text-3); }
+.tk-scope .tk-list .tk-row__meta a { color: var(--tk-text-2); }
+.tk-scope .tk-list .tk-row__meta a:hover { color: var(--tk-text); text-decoration: underline; }
+.tk-row__side { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 7px; padding-right: 34px; }
+.tk-row__go {
+  position: absolute; right: 18px; top: 50%; width: 26px; height: 26px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--tk-surface); background: var(--tk-ink); text-decoration: none; font-size: 14px;
+  opacity: 0; transform: translate(-6px, -50%); transition: opacity .25s, transform .25s var(--tk-ease);
+}
+.tk-row:hover .tk-row__go { opacity: 1; transform: translate(0, -50%); }
+.tk-pager { margin-top: 20px; }
+
+/* ---------- 状态胶囊 ---------- */
+.tk-status {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px;
+  border-radius: 999px; font-size: 12px; line-height: 18px; font-weight: 600; white-space: nowrap;
+  border: 1px solid transparent; background: var(--tk-surface-2); color: var(--tk-text-2);
+  transition: transform .22s var(--tk-ease), box-shadow .22s;
+}
+.tk-status::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .75; }
+.tk-status--pending { background: rgba(var(--tk-pending-rgb), .12); border-color: rgba(var(--tk-pending-rgb), .32); color: var(--tk-pending); }
+.tk-status--processing { background: rgba(var(--tk-processing-rgb), .12); border-color: rgba(var(--tk-processing-rgb), .32); color: var(--tk-processing); }
+.tk-status--replied { background: rgba(var(--tk-replied-rgb), .12); border-color: rgba(var(--tk-replied-rgb), .32); color: var(--tk-replied); }
+.tk-status--closed { background: rgba(var(--tk-closed-rgb), .14); border-color: rgba(var(--tk-closed-rgb), .3); color: var(--tk-closed); }
+.tk-status--done { background: rgba(var(--tk-done-rgb), .14); border-color: rgba(var(--tk-done-rgb), .3); color: var(--tk-done); }
+.tk-status--lg { padding: 7px 15px; font-size: 13px; }
+.tk-legend { list-style: none; padding: 0; margin: 0 0 12px; display: flex; flex-direction: column; gap: 8px; }
+.tk-legend li { display: flex; align-items: center; gap: 8px; }
+.tk-legend li.is-current .tk-status { transform: scale(1.05); font-weight: 700; }
+.tk-legend__flag { font-size: 11px; color: var(--tk-text-2); font-weight: 700; }
+
+/* ---------- 详情页 · B 动效：状态卡堆叠旋转切换（视频 1：实心色卡 + 同色偏移残影） ---------- */
+.tk-deck { position: relative; padding: 18px 16px 14px; border-radius: 20px; background: var(--tk-surface-2); }
+.tk-deck.is-flipping { animation: tk-deck-shake .38s var(--tk-spring); }
+/* 残影画在卡片伪元素上：颜色永远跟随当前状态色，切换时随卡一起进出 */
+.tk-deck__card {
+  position: relative; isolation: isolate; min-height: 150px; box-sizing: border-box; padding: 18px;
+  border: 0; border-radius: 18px; background: transparent; color: #fff;
+  transform-origin: 55% 60%;
+}
+.tk-deck__card::before {
+  content: ''; position: absolute; inset: 0; z-index: -1;
+  border-radius: inherit; background: var(--tk-deck-color, var(--tk-primary));
+}
+.tk-deck__card::after {
+  content: ''; position: absolute; inset: 0; z-index: -2;
+  border-radius: inherit; background: var(--tk-deck-color, var(--tk-primary));
+  opacity: .5; transform: translate(9px, 11px) rotate(5.5deg);
+}
+.tk-deck__card--pending { --tk-deck-color: #f5a524; }
+.tk-deck__card--processing { --tk-deck-color: #2f333b; }
+.tk-deck__card--replied { --tk-deck-color: #9167e8; }
+.tk-deck__card--closed { --tk-deck-color: #8b95a7; }
+.tk-deck__card--done { --tk-deck-color: #21b5a4; }
+.tk-deck__card .tk-status {
+  background: rgba(255, 255, 255, .22); border-color: rgba(255, 255, 255, .42); color: #fff;
+}
+.tk-deck__card[hidden] { display: none; }
+.tk-deck__card.is-out { animation: tk-card-out .34s cubic-bezier(.4, 0, .75, .5) both; }
+.tk-deck__card.is-in { animation: tk-card-in .38s var(--tk-spring) both; }
+.tk-deck__kicker { font-size: 10px; font-weight: 700; letter-spacing: .14em; color: rgba(255, 255, 255, .72); }
+.tk-deck__card .tk-status { margin-top: 12px; }
+.tk-deck__text { margin: 12px 0 0; font-size: 12px; line-height: 1.7; color: rgba(255, 255, 255, .92); }
+.tk-deck__nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
+.tk-deck__nav button {
+  width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--tk-border-strong);
+  background: var(--tk-surface); color: var(--tk-text); font-size: 17px; line-height: 1; cursor: pointer;
+  transition: transform .26s var(--tk-spring), background .2s, color .2s;
+}
+.tk-deck__nav button:hover { transform: scale(1.12); background: var(--tk-ink); color: #fff; }
+.tk-deck__label { font-size: 11px; font-weight: 700; color: var(--tk-text-3); letter-spacing: .1em; }
+
+/* ---------- 详情页主体 ---------- */
+.tk-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.tk-meta li {
+  padding: 11px 14px; border: 1px solid var(--tk-border); border-radius: var(--tk-radius-sm);
+  background: var(--tk-surface-2); font-size: 12px; color: var(--tk-text-3);
+}
+.tk-meta li strong { color: var(--tk-text); }
+.tk-meta a { color: var(--tk-link-strong); text-decoration: none; }
+.tk-fields-view { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; margin: 0; }
+.tk-fv { padding: 14px 16px; border: 1px solid var(--tk-border); border-radius: var(--tk-radius-sm); background: var(--tk-surface-2); }
+.tk-fv dt { margin: 0 0 8px; font-size: 12px; font-weight: 700; color: var(--tk-text-3); }
+.tk-fv dd { margin: 0; color: var(--tk-text); font-size: 13px; word-break: break-word; }
+.tk-fv dd p:first-child { margin-top: 0; }
+.tk-fv dd p:last-child { margin-bottom: 0; }
+.tk-timeline { list-style: none; margin: 0; padding: 0 0 0 4px; }
+.tk-tl-item { position: relative; padding: 0 0 18px 26px; border-left: 1px solid var(--tk-border-strong); font-size: 13px; color: var(--tk-text-2); }
+.tk-tl-item:last-child { border-left-color: transparent; padding-bottom: 0; }
+.tk-tl-item::before {
+  content: ''; position: absolute; left: -6px; top: 4px; width: 11px; height: 11px;
+  border-radius: 50%; background: var(--tk-surface); border: 2px solid var(--tk-border-strong);
+}
+.tk-tl-item:first-child::before { border-color: var(--tk-ink); animation: tk-pulse 2.6s ease-in-out infinite; }
+.tk-tl-item__text { color: var(--tk-text); }
+.tk-tl-item__time { color: var(--tk-text-3); font-size: 12px; }
+.tk-reply {
+  margin-bottom: 12px; border: 1px solid var(--tk-border); border-radius: 16px;
+  background: var(--tk-surface); overflow: hidden;
+  transition: border-color .25s;
+}
+.tk-reply:hover { border-color: var(--tk-border-strong); }
+.tk-reply--mod { border-color: var(--tk-border-strong); border-left: 3px solid var(--tk-primary); background: var(--tk-surface); }
+.tk-reply__head { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; padding: 11px 16px; border-bottom: 1px solid var(--tk-border); background: var(--tk-glass-2); font-size: 12px; }
+.tk-reply--mod .tk-reply__head { background: var(--tk-surface-2); }
+.tk-scope .section__body .tk-reply__head a { color: var(--tk-text); text-decoration: none; }
+.tk-scope .section__body .tk-reply__head a:hover { color: var(--tk-text); text-decoration: underline; }
+.tk-reply__body { padding: 14px 18px; min-height: 40px; }
+.tk-reply__body p:first-child { margin-top: 0; }
+.tk-reply__body p:last-child { margin-bottom: 0; }
+.tk-badge { padding: 3px 9px; border-radius: 999px; background: var(--tk-surface-2); color: var(--tk-text-2); font-size: 11px; font-weight: 600; }
+.tk-badge--mod { background: var(--tk-ink); color: var(--tk-surface); }
+
+/* 功能列表（快捷导航）：发丝线行列表 + 深色圆箭头，替代裸蓝链接堆 */
+.tk-navlist { list-style: none; margin: 0; padding: 0; }
+.tk-navlist li { border-bottom: 1px solid var(--tk-border); }
+.tk-navlist li:last-child { border-bottom: 0; }
+.tk-scope .section__body .tk-navlist a {
+  display: flex; align-items: center; gap: 10px; padding: 11px 2px;
+  color: var(--tk-text-2); text-decoration: none; font-size: 13px; font-weight: 600;
+  transition: color .22s, padding-left .26s var(--tk-ease);
+}
+.tk-scope .section__body .tk-navlist a:hover { color: var(--tk-text); padding-left: 8px; text-decoration: none; }
+.tk-navlist__arrow {
+  margin-left: auto; flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--tk-ink); color: var(--tk-surface); font-size: 11px; font-style: normal;
+  transition: transform .26s var(--tk-spring);
+}
+.tk-navlist a:hover .tk-navlist__arrow { transform: rotate(-35deg); }
+.tk-ops-wrap { position: sticky; top: 18px; }
+.tk-ops form { margin-bottom: 10px; }
+.tk-ops .select { width: 100%; margin-bottom: 10px; }
+.tk-ops hr { border: 0; border-top: 1px solid var(--tk-border); margin: 16px 0; }
+.tk-ops > .tk-btn, .tk-ops form > .tk-btn { width: 100%; }
+.tk-quick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 10px; }
+.tk-quick form { display: contents; }
+.tk-quick__btn {
+  display: flex; align-items: center; gap: 8px; box-sizing: border-box; padding: 11px 12px;
+  border: 1px solid var(--tk-border); border-radius: 14px; background: var(--tk-surface-2);
+  color: var(--tk-text-2); font-size: 12px; font-weight: 600; cursor: pointer; text-align: left;
+  transition: transform .22s var(--tk-ease), box-shadow .22s, background .22s, color .22s, border-color .22s;
+}
+.tk-quick__btn:hover {
+  border-color: var(--tk-border-strong); color: var(--tk-text); background: var(--tk-surface);
+}
+.tk-quick__btn i { font-style: normal; font-size: 15px; }
+/* 图标染目标状态的语义色：颜色有含义，不是装饰蓝 */
+.tk-quick form .tk-quick__btn:nth-of-type(1) i { color: var(--tk-processing); }
+.tk-quick form .tk-quick__btn:nth-of-type(2) i { color: var(--tk-replied); }
+.tk-quick form .tk-quick__btn:nth-of-type(3) i { color: var(--tk-done); }
+.tk-quick form .tk-quick__btn:nth-of-type(4) i { color: var(--tk-closed); }
+
+/* ---------- 题目右侧「题目反馈」按钮 ---------- */
+.tk-feedback-btn {
+  position: relative; margin: 2px 0; border-radius: 999px !important; color: var(--tk-on-primary) !important;
+  background: linear-gradient(135deg, var(--tk-primary), var(--tk-primary-2)) !important;
+  box-shadow: var(--tk-shadow-pill); font-weight: 600;
+  transition: box-shadow .24s var(--tk-ease) !important;
+}
+.tk-feedback-btn:hover { transform: none; box-shadow: 0 2px 8px rgba(20, 30, 50, .16) !important; }
+.tk-feedback-btn:active { transform: translateY(0) scale(.98); }
+.tk-feedback-btn .icon { color: var(--tk-on-primary) !important; }
+.tk-feedback-sep { opacity: .55; }
+
+/* ---------- 响应式与无障碍 ---------- */
+@media (max-width: 980px) {
+  .tk-board { grid-template-columns: 1fr; }
+  .tk-stage { min-height: 340px; }
+  .tk-stage__inner { min-height: 280px; }
+  .tk-stage__title { font-size: 34px; }
+  .tk-stage__art { width: 120px; height: 120px; }
+}
+@media (max-width: 900px) {
+  .tk-shell { padding: 12px; border-radius: 20px; }
+  .tk-hero { padding: 20px; }
+  .tk-hero--art { grid-template-columns: 1fr; }
+  .tk-hero__art { height: 190px; }
+  .tk-hero__title { font-size: 22px; }
+  .tk-top__title { font-size: 27px; }
+  .tk-picker { padding: 24px 20px; }
+  .tk-row { flex-wrap: wrap; }
+  .tk-row__side { flex-direction: row; align-items: center; gap: 10px; padding-right: 34px; }
+  .tk-ops-wrap { position: static; }
+  .tk-fields { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tk-rise, .tk-shell, .tk-card, .tk-row, .tk-tl-item, .tk-reply, .tk-fv,
+  .tk-quick__btn, .tk-hero::before, .tk-hero__eyebrow::before,
+  .tk-hero__blob, .tk-hero__art > .tk-hero__img, .tk-hero__chip3,
+  .tk-dot--processing, .tk-cat.active .tk-cat__core, .tk-tl-item:first-child::before,
+  .tk-stage__blob, .tk-stage__blob--out, .tk-stage__title, .tk-stage__desc,
+  .tk-stage__art, .tk-fieldzone, .tk-cat.is-bump, .tk-deck__card, .tk-reveal {
+    animation: none !important;
+  }
+  .tk-scope *, .tk-feedback-btn, .tk-cat, .tk-row, .tk-btn { transition-duration: .01ms !important; }
+}
+/* 打印：跳过动画，避免纸张上出现半透明/旋转元素 */
+@media print {
+  .tk-shell, .tk-card, .tk-row, .tk-tl-item, .tk-reply, .tk-fv,
+  .tk-quick__btn, .tk-rise, .tk-stage__blob, .tk-stage__title, .tk-stage__desc,
+  .tk-stage__art, .tk-fieldzone, .tk-deck__card, .tk-reveal,
+  .tk-hero__blob, .tk-hero__art > .tk-hero__img, .tk-hero__chip3 {
+    animation: none !important; opacity: 1 !important; transform: none !important;
+  }
+  .tk-shell { box-shadow: none; }
+  .tk-stage__blob--out, .tk-reveal { display: none !important; }
+  .tk-deck__card[hidden], .tk-fields[hidden] { display: none !important; }
+}

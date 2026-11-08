@@ -1,0 +1,11 @@
+{
+  "name": "hydrooj-plugin-ticket",
+  "version": "1.0.0",
+  "description": "HydroOJ 题目反馈工单插件：题面修缮 / 数据维护 / 难度调整，支持认领、状态流转与 Markdown 回复",
+  "main": "index.ts",
+  "private": true,
+  "license": "MIT",
+  "devDependencies": {
+    "hydrooj": "*"
+  }
+}
